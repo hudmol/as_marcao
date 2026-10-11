@@ -431,8 +431,8 @@ class MarcAOMapper
             </datafield>"
 
     # addesses github 181 'Physical Location (can this be pulled from the collection-level note?)	982'
-    tag982 = 
-    unless top_container_location_code&.nil?
+    tag982 =
+    if top_container_location_code
       "<datafield ind1=' ' ind2=' ' tag='982'><subfield code='c'>#{top_container_location_code}</subfield></datafield>"
     end
 
