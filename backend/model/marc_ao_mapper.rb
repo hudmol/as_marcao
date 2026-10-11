@@ -72,13 +72,12 @@ class MarcAOMapper
                 get_ao['dates'][0]['end'].gsub(/(^)(\d{4})(.*$)/, '\2')
               else
                 date1
-                # # 4 blanks
               end
     end
 
     language = get_ao.dig('lang_materials', 0, 'language_and_script', 'language')
-    tag008_langcode =
-      language || 'eng'
+    tag008_langcode = language || 'eng'
+
     # process the notes requested
     notes = get_ao['notes']
     restrictions_hash = notes.select { |hash| hash['type'] == 'accessrestrict' }
@@ -103,6 +102,7 @@ class MarcAOMapper
     end
 
     extents = get_ao['extents']
+
     # process linked agents
     agents = get_ao['linked_agents']
     agents_processed = agents.map do |agent|
@@ -125,7 +125,7 @@ class MarcAOMapper
     instances = get_ao['instances']
 
     #map instance types
-    leader_06 = instances.map do |instance|
+    leader_06 = instances&.map do |instance|
       case instance['instance_type']
       when "audio"
         "i"
@@ -135,7 +135,7 @@ class MarcAOMapper
         "m"
       when "graphic_materials"
         "k"
-      when "microform" || "moving_images"
+      when "microform", "moving_images"
         "g"
       else
         "t"
@@ -143,10 +143,10 @@ class MarcAOMapper
     end
 
     # process locations
-    instances.select {|instance| instance['instance_type'] == "mixed_materials"}
+    instances&.select {|instance| instance['instance_type'] == "mixed_materials"}
 
     #process containers first
-    top_containers = instances.map do |instance|
+    top_containers = instances&.map do |instance|
       if instance['sub_container'].nil? == false
         instance['sub_container']['top_container']['_resolved']
       elsif instance['top_container']
@@ -154,9 +154,7 @@ class MarcAOMapper
       end
     end
 
-    if !top_containers.empty? && !top_containers.first['container_locations'].empty?
-        top_container_location_code = top_containers.first['container_locations'][0]['_resolved']['classification']
-      end
+    top_container_location_code = top_containers&.first&.dig('container_locations',0,'_resolved','classification')
 
     #process linked subjects
     subjects = get_ao['subjects']
@@ -175,8 +173,8 @@ class MarcAOMapper
         'terms' => subject['_resolved']['terms']
       }
     end
-    # add controlfields
-    leader = "<leader>00000n#{leader_06[0]}maa22000002u 4500</leader>"
+    # add controlfields 
+    leader = "<leader>00000n#{leader_06[0] || 't'}maa22000002u 4500</leader>"
     tag001 = "<controlfield tag='001'>#{ref_id}</controlfield>"
     tag003 = "<controlfield tag='003'>PULFA</controlfield>"
     tag008 = Nokogiri::XML.fragment("<controlfield tag='008'>000000#{tag008_date_type}#{date1}#{date2}xx      |           #{tag008_langcode} d</controlfield>")
@@ -226,7 +224,7 @@ class MarcAOMapper
       tag300 =
         if extents.count > 1
           repeatable_subfields =
-            extents[1..].map do |extent|
+            extents[1..-1].map do |extent|
           "<subfield code = 'a'>#{extent['number']}</subfield>
                    <subfield code = 'f'>#{extent['extent_type']})</subfield>"
         end
@@ -331,6 +329,11 @@ class MarcAOMapper
       subfield_2 = source_code == 7 ? "<subfield code = '2'>#{agent['source']}</subfield>" : nil
       add_punctuation = agent['name_dates'].nil? ? '.' : ','
       subfield_0 = agent['identifier'].nil? ? nil : "<subfield code = '0'>#{agent['identifier']}</subfield>"
+      #addresses #795
+      subfield_5 = 
+        if agent['source'] == 'local'
+          '<subfield code="5">NjP</subfield>'
+        end
       # create 1xx
       # add lookahead to replace ampersands (but not entity names)
       tag1xx <<
@@ -341,6 +344,7 @@ class MarcAOMapper
                   #{subfield_e ||= ''}
                   #{subfield_2 ||= ''}
                   #{subfield_0 ||= ''}
+                  #{subfield_5}
                 </datafield>"
         end
       "<datafield ind1='#{name_type}' ind2='#{tag.to_s[0]=='7' ? ' ' : source_code}' tag='#{tag}'>
@@ -349,6 +353,7 @@ class MarcAOMapper
               #{subfield_e ||= ''}
               #{subfield_2 ||= ''}
               #{subfield_0 ||= ''}
+              #{subfield_5}
             </datafield>"
     end
 
@@ -362,7 +367,7 @@ class MarcAOMapper
         case subject['type']
         when 'cultural_context'
           647
-        when 'topical' || 'temporal'
+        when 'topical', 'temporal'
           650
         when 'geographic'
           651
@@ -375,11 +380,12 @@ class MarcAOMapper
         else
           7
         end
+
       main_term = subject['main_term']
-      subterms = subject['terms'][1..].map do |subterm|
+      subterms = subject['terms'][1..-1].map do |subterm|
         subfield_code =
           case subterm['term_type']
-          when 'temporal' || 'style_period' || 'cultural_context'
+          when 'temporal', 'style_period', 'cultural_context'
             'y'
           when 'genre_form'
             'v'
@@ -395,20 +401,25 @@ class MarcAOMapper
         if subject['terms'].count == 1 && subject['full_first_term'] =~ /--/
           tokens = subject['full_first_term'].split('--')
           tokens.each(&:strip!)
-          tokens[1..].map do |token|
+          tokens[1..-1].map do |token|
           subfield_code = token =~ /^[0-9]{2}/ ? 'y' : 'x'
           "<subfield code = '#{subfield_code}'>#{token}</subfield>"
         end
         end
       #add subfield 2 if source code is 7
       subfield_2 = source_code == 7 ? "<subfield code = '2'>#{subject['source']}</subfield>" : nil
-
+      # addresses github #795
+      subfield_5 = 
+        if subject['source'] == 'local'
+          '<subfield code="5">NjP</subfield>'
+        end
       #put the field together
       "<datafield ind1=' ' ind2='#{source_code}' tag='#{tag}'>
               <subfield code = 'a'>#{main_term}</subfield>
                 #{subterms.join(' ')}
                 #{computed_subterms.join(' ') unless computed_subterms.nil?}
                 #{subfield_2}
+                #{subfield_5}
               </datafield>"
     end
 
@@ -420,7 +431,10 @@ class MarcAOMapper
             </datafield>"
 
     # addesses github 181 'Physical Location (can this be pulled from the collection-level note?)	982'
-    tag982 = "<datafield ind1=' ' ind2=' ' tag='982'><subfield code='c'>#{top_container_location_code}</subfield></datafield>"
+    tag982 =
+    if top_container_location_code
+      "<datafield ind1=' ' ind2=' ' tag='982'><subfield code='c'>#{top_container_location_code}</subfield></datafield>"
+    end
 
     # assemble the record
     record =

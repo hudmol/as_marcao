@@ -14,11 +14,11 @@ class MarcAOExporter
 
     Log.info("marcao: MARC AO Exporter running")
 
-    res_ids = UserDefined.filter(AppConfig[:marcao_flag_field].intern => 1).filter(Sequel.~(:resource_id => nil)).select(:resource_id).all.map{|r| r[:resource_id]}
+    res_ids = UserDefined.filter(AppConfig[:marcao_flag_field].intern => 1).filter(Sequel.~(:resource_id => nil)).select(:resource_id).all.map{ |r| r[:resource_id]}
 
     ao_ds = ArchivalObject.any_repo.filter(:root_record_id => res_ids)
 
-    if (report = last_report) && report['last_success_at']
+    if (report = last_report) && report&.fetch('last_success_at', nil)
       since = DateTime.parse(report['last_success_at']).to_time - WINDOW_SECONDS
       ao_ds = ao_ds.where{system_mtime > since}
     end
@@ -34,7 +34,7 @@ class MarcAOExporter
       File.rename(export_file_path + ".tmp", export_file_path)
     rescue => e
       status = :export_fail
-      error = e.message
+      error = "#{e.message} #{e.backtrace}"
     end
 
     if status == :ok
@@ -77,7 +77,7 @@ class MarcAOExporter
 
     report = {
       :status => status,
-      :last_success_at => [:ok, :no_sftp].include?(status) ? start : report['last_success_at'],
+      :last_success_at => [:ok, :no_sftp].include?(status) ? start : report&.fetch('last_success_at', nil),
       :export_started_at => start,
       :export_completed_at => Time.now,
       :export_file => export_file_path,
@@ -102,7 +102,7 @@ class MarcAOExporter
       .select(:repo_id, :id)
       .all
       .group_by(&:repo_id)
-      .map {|repo_id, rows| [repo_id, rows.map {|row| row[:id]}]}
+      .map { |repo_id, rows| [repo_id, rows.map { |row| row[:id]}]}
       .to_h
 
     grouped_ids.each do |repo_id, ao_ids|
